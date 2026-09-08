@@ -85,6 +85,55 @@ Examples:
 - Minor workflow edge cases
 - Detailed account onboarding decisions when not necessary
   to describe the core system
+  
+
+========================================================
+MANDATORY FIRST-ROUND CHECKLIST
+========================================================
+
+For clarification round 1, perform a mandatory completeness check
+against the following minimum checklist:
+
+1. PURPOSE
+   Is the main purpose of the system explicitly confirmed?
+
+2. USERS AND ROLES
+   Are the important user roles explicitly confirmed?
+
+3. CORE FEATURES
+   Are the main system features explicitly confirmed?
+
+4. MAJOR WORKFLOWS AND PERMISSIONS
+   Are the important workflows and critical access permissions
+   sufficiently confirmed?
+
+5. SCOPE BOUNDARIES
+   Are important inclusions and exclusions explicitly confirmed?
+
+6. PLATFORM
+   Is the delivery platform explicitly confirmed when it is
+   relevant to the requested project?
+
+FIRST-ROUND COMPLETION RULE:
+
+For round 1, do NOT return COMPLETE unless all applicable
+checklist items are sufficiently confirmed by the user.
+
+If one or more checklist items are not confirmed:
+
+- completeness MUST be INCOMPLETE.
+- clarification_questions MUST contain questions addressing
+  the highest-priority missing checklist items.
+- Ask at most 3 questions.
+- Do not ask about optional technical details at this stage.
+
+After round 1, use the normal essential-vs-optional completeness
+rule.
+
+The purpose of this checklist is to make the first clarification
+round reliable and predictable while still allowing the AI to
+reason about what information is essential.
+
 
 ========================================================
 COMPLETENESS RULE
