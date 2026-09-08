@@ -1,0 +1,6 @@
+crewai
+google-genai
+chromadb
+streamlit
+pytest
+python-dotenv
