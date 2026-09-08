@@ -219,20 +219,100 @@ Before finishing, internally verify that every opening
 FILE_CONTENTS_START has a matching FILE_CONTENTS_END.
 
 ============================================================
-FILE FORMAT
+STRICT MACHINE-READABLE FILE FORMAT
 ============================================================
 
-For each generated file, use exactly:
+The generated project will be processed automatically by a
+CodeForge AI file-generation tool.
 
-### File: <file path>
+Therefore, the GENERATED FILES section MUST use exactly the
+following format.
+
+For EVERY generated file:
+
+### File: <relative file path>
 
 FILE_CONTENTS_START
 <complete file contents>
 FILE_CONTENTS_END
 
-Do not wrap these markers in Markdown code fences.
+STRICT RULES:
 
-Do not add a second version of the same file.
+1. The line `### File:` must contain the relative file path.
+
+2. The file path must NOT be absolute.
+
+3. Do NOT use `../` or path traversal.
+
+4. Use exactly one FILE_CONTENTS_START for each file.
+
+5. Use exactly one FILE_CONTENTS_END for each file.
+
+6. Do NOT put Markdown code fences around the markers.
+
+7. Do NOT add explanations between FILE_CONTENTS_START and
+   FILE_CONTENTS_END.
+
+8. Do NOT generate multiple versions of the same file.
+
+9. Do NOT say "same as above".
+
+10. Do NOT abbreviate code.
+
+11. Do NOT replace code with placeholders such as:
+    - TODO
+    - rest of code
+    - implementation omitted
+    - unchanged code
+
+12. The contents between FILE_CONTENTS_START and
+    FILE_CONTENTS_END must be the exact complete contents
+    of that file.
+
+13. Every file referenced by another generated file must
+    either be generated or be a standard external dependency.
+
+14. Generate no more than 15 files.
+
+15. The final response must contain the complete generated
+    files before the Requirement-to-Code Mapping section.
+
+============================================================
+GENERATION ORDER
+============================================================
+
+Generate files in this order where applicable:
+
+1. Database schema
+2. Backend package/configuration
+3. Backend application
+4. Authentication
+5. Models/services
+6. Controllers
+7. Routes
+8. Frontend package/configuration
+9. Frontend authentication/state
+10. Frontend pages/components
+11. README
+12. Minimal tests
+
+Do NOT generate a file merely because it is common in similar
+projects. Every generated file must support the confirmed
+requirements and approved architecture.
+
+============================================================
+FINAL FILE FORMAT VALIDATION
+============================================================
+
+Before returning the response, internally verify:
+
+- Every generated file starts with `### File:`.
+- Every generated file has exactly one FILE_CONTENTS_START.
+- Every generated file has exactly one FILE_CONTENTS_END.
+- Every FILE_CONTENTS_START has a matching FILE_CONTENTS_END.
+- No file is duplicated.
+- No file is truncated.
+- No file contains placeholder code.
 
 ============================================================
 IMPLEMENTATION CONSISTENCY
