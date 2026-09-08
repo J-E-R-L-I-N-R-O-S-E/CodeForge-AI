@@ -1,11 +1,16 @@
-from google import genai
-from config import GEMINI_API_KEY
+from gemini_service import GeminiService
 
-client = genai.Client(api_key=GEMINI_API_KEY)
 
-response = client.models.generate_content(
-    model="gemini-3.6-flash",
-    contents="Reply only with: CodeForge AI connection successful."
-)
+def main() -> None:
+    gemini = GeminiService()
 
-print(response.text)
+    response = gemini.generate(
+        "Reply only with: "
+        "CodeForge AI Gemini service is working."
+    )
+
+    print(response)
+
+
+if __name__ == "__main__":
+    main()
