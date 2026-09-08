@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from services.llm_service import LLMService
+from memory.memory_service import MemoryService
 from tasks.requirement_tasks import create_requirement_analysis_prompt
 from tasks.srs_tasks import create_final_srs_prompt
 
@@ -14,6 +15,7 @@ class RequirementState:
     """Stores the current state of a CodeForge AI requirement session."""
 
     project_idea: str
+    project_id: str = ""
     round_number: int = 0
 
     explicit_requirements: list[str] = field(default_factory=list)
@@ -49,9 +51,29 @@ class RequirementService:
     """
 
     MAX_ROUNDS = 5
+    @staticmethod
+    def _create_project_id(project_idea: str) -> str:
+        """
+        Create a simple deterministic project ID from the
+        project idea.
+        """
+
+        normalized = " ".join(
+            project_idea.lower().split()
+        )
+
+        project_id = (
+            normalized[:50]
+            .replace(" ", "_")
+            .replace("/", "_")
+            .replace("\\", "_")
+        )
+
+        return project_id or "project"
 
     def __init__(self) -> None:
         self.llm_service = LLMService()
+        self.memory_service = MemoryService()
 
     # =========================================================
     # Utility methods
@@ -235,12 +257,50 @@ class RequirementService:
             )
 
         previous_answers = previous_answers or ""
+        
+        memory_context = ""
+
+        if hasattr(self, "memory_service") and previous_answers:
+            project_id = self._create_project_id(project_idea)
+
+            memories = self.memory_service.search(
+                query=previous_answers,
+                n_results=5,
+                project_id=project_id,
+            )
+
+            if memories:
+                memory_context = "\n\n".join(
+                    (
+                        f"Memory ({item['metadata'].get('type', 'unknown')}):\n"
+                        f"{item['text']}"
+                    )
+                    for item in memories
+                )
 
         prompt = create_requirement_analysis_prompt(
             project_idea=project_idea,
             previous_answers=previous_answers,
             round_number=round_number,
         )
+
+        if memory_context:
+            prompt += f"""
+
+========================================================
+RELEVANT PROJECT MEMORY
+========================================================
+
+Use the following retrieved project memory as context.
+
+Do NOT treat unrelated memories as requirements.
+
+{memory_context}
+
+========================================================
+END PROJECT MEMORY
+========================================================
+"""
 
         print("\n" + "=" * 60)
         print(
@@ -318,6 +378,18 @@ class RequirementService:
 
         state = RequirementState(
             project_idea=project_idea.strip(),
+            project_id=self._create_project_id(
+                project_idea.strip()
+            ),
+        )
+        self.memory_service.store_project_idea(
+            project_id=state.project_id,
+            project_idea=state.project_idea,
+        )
+
+        self.memory_service.store_project_idea(
+            project_id=project_id,
+            project_idea=state.project_idea,
         )
 
         analysis = self.analyze(
@@ -363,6 +435,12 @@ class RequirementService:
         answer = user_answer.strip()
 
         state.user_answers.append(answer)
+        
+        self.memory_service.store_clarification(
+            project_id=state.project_id,
+            round_number=state.round_number + 1,
+            answer=answer,
+        )
 
         combined_answers = "\n\n".join(
             (
@@ -409,6 +487,10 @@ class RequirementService:
             f"- {item}"
             for item in state.explicit_requirements
         )
+        self.memory_service.store_requirements(
+            project_id=state.project_id,
+            requirements=state.explicit_requirements,
+        )
 
         prompt = create_final_srs_prompt(
             project_idea=state.project_idea,
@@ -420,6 +502,10 @@ class RequirementService:
         print("=" * 60)
 
         state.final_srs = self.llm_service.generate(prompt).strip()
+        self.memory_service.store_srs(
+            project_id=state.project_id,
+            srs=state.final_srs,
+        )
 
         if not state.final_srs:
             raise RuntimeError(
