@@ -1,6 +1,10 @@
 crewai
+crewai[litellm]
 google-genai
 chromadb
 streamlit
 pytest
 python-dotenv
+openai
+groq
+litellm
