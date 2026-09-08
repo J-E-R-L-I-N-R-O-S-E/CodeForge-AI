@@ -50,7 +50,10 @@ class TestingService:
             project_code=inspection["project_code"],
         )
 
-        return self.testing_agent.generate(prompt)
+        return self.testing_agent.generate(
+            prompt=prompt,
+            preferred_provider="openrouter",
+        )
 
     def inspect_project(
         self,

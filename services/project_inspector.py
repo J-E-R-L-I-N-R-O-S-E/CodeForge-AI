@@ -10,6 +10,29 @@ class ProjectInspector:
     its structure and source code for the Testing Agent.
     """
 
+    SUPPORTED_EXTENSIONS = {
+        ".py",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".java",
+        ".c",
+        ".cpp",
+        ".cs",
+        ".go",
+        ".html",
+        ".css",
+        ".json",
+        ".md",
+        ".txt",
+        ".sql",
+        ".prisma",
+        ".yml",
+        ".yaml",
+        ".env",
+    }
+
     def __init__(self, project_path: str | Path) -> None:
         self.project_path = Path(project_path)
 
@@ -34,7 +57,8 @@ class ProjectInspector:
         self.validate_project()
 
         files = sorted(
-            path for path in self.project_path.rglob("*")
+            path
+            for path in self.project_path.rglob("*")
             if path.is_file()
         )
 
@@ -46,63 +70,82 @@ class ProjectInspector:
             for path in files
         )
 
-    def get_code(self) -> str:
+    def get_code(self, max_chars: int = 12000) -> str:
         """
-        Read generated text/code files.
-
-        Binary files are skipped.
+        Collect project source code while enforcing a maximum
+        total output-character budget, including file markers.
         """
 
         self.validate_project()
 
-        supported_extensions = {
-            ".js",
-            ".jsx",
-            ".ts",
-            ".tsx",
-            ".json",
-            ".prisma",
-            ".md",
-            ".txt",
-            ".env",
-            ".sql",
-            ".css",
-            ".html",
-        }
+        if max_chars <= 0:
+            raise ValueError(
+                "max_chars must be greater than zero."
+            )
 
-        sections: list[str] = []
+        sections = []
+        total_chars = 0
 
         files = sorted(
-            path for path in self.project_path.rglob("*")
+            path
+            for path in self.project_path.rglob("*")
             if path.is_file()
         )
 
-        for path in files:
-            if path.suffix.lower() not in supported_extensions:
+        for file_path in files:
+            if file_path.suffix.lower() not in self.SUPPORTED_EXTENSIONS:
                 continue
 
             try:
-                content = path.read_text(
-                    encoding="utf-8"
+                content = file_path.read_text(
+                    encoding="utf-8",
+                    errors="ignore",
                 )
-            except UnicodeDecodeError:
+            except OSError:
                 continue
 
-            relative_path = path.relative_to(
+            relative_path = file_path.relative_to(
                 self.project_path
-            )
+            ).as_posix()
 
-            sections.append(
+            prefix = (
                 f"### File: {relative_path}\n"
                 f"FILE_CONTENTS_START\n"
-                f"{content}\n"
-                f"FILE_CONTENTS_END"
             )
 
-        if not sections:
-            return "(No readable source files found.)"
+            suffix = "\nFILE_CONTENTS_END"
 
-        return "\n\n".join(sections)
+            remaining = max_chars - total_chars
+
+            # We need enough room for the complete file markers.
+            marker_length = len(prefix) + len(suffix)
+
+            if remaining <= marker_length:
+                break
+
+            available_content = remaining - marker_length
+
+            truncated_content = content[:available_content]
+
+            section = (
+                prefix
+                + truncated_content
+                + suffix
+            )
+
+            sections.append(section)
+            total_chars += len(section)
+
+            if total_chars >= max_chars:
+                break
+
+        if not sections:
+            return "(No supported source files found.)"[:max_chars]
+
+        result = "\n\n".join(sections)
+
+        # Final hard safety guarantee.
+        return result[:max_chars]
 
     def inspect(self) -> Dict[str, str]:
         """
@@ -111,7 +154,7 @@ class ProjectInspector:
 
         return {
             "project_structure": self.get_structure(),
-            "project_code": self.get_code(),
+            "project_code": self.get_code(max_chars=5000),
         }
 
 

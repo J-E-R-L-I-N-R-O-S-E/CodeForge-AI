@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from google import genai
 from groq import Groq
@@ -21,14 +21,17 @@ class LLMService:
     """
     Central LLM provider service for CodeForge AI.
 
-    Provider priority:
-        1. Gemini
-        2. OpenRouter
-        3. Groq
+    Provider order:
+        Gemini -> OpenRouter -> Groq
 
-    If one provider fails, the service automatically attempts
-    the next configured provider.
+    A preferred provider can be supplied for specialized tasks.
+
+    All HTTP-based providers use a bounded timeout so a stalled
+    provider cannot block the entire application indefinitely.
     """
+
+    PROVIDER_TIMEOUT = 30.0
+    MAX_RETRIES_PER_PROVIDER = 1
 
     def __init__(self) -> None:
         self.gemini_client: Optional[genai.Client] = None
@@ -44,12 +47,20 @@ class LLMService:
             self.openrouter_client = OpenAI(
                 api_key=OPENROUTER_API_KEY,
                 base_url=OPENROUTER_BASE_URL,
+                timeout=self.PROVIDER_TIMEOUT,
+                max_retries=0,
             )
 
         if GROQ_API_KEY:
             self.groq_client = Groq(
-                api_key=GROQ_API_KEY
+                api_key=GROQ_API_KEY,
+                timeout=self.PROVIDER_TIMEOUT,
+                max_retries=0,
             )
+
+    # ============================================================
+    # Gemini
+    # ============================================================
 
     def _generate_gemini(self, prompt: str) -> str:
         """Generate a response using Gemini."""
@@ -64,7 +75,7 @@ class LLMService:
             contents=prompt,
         )
 
-        text = response.text
+        text = getattr(response, "text", None)
 
         if not text or not text.strip():
             raise RuntimeError(
@@ -72,6 +83,10 @@ class LLMService:
             )
 
         return text.strip()
+
+    # ============================================================
+    # OpenRouter
+    # ============================================================
 
     def _generate_openrouter(self, prompt: str) -> str:
         """Generate a response using OpenRouter."""
@@ -97,16 +112,18 @@ class LLMService:
             )
 
         message = response.choices[0].message
-
         text = getattr(message, "content", None)
 
         if not text or not text.strip():
             raise RuntimeError(
-                "OpenRouter returned a response without "
-                "usable text content."
+                "OpenRouter returned a response without usable text content."
             )
 
         return text.strip()
+
+    # ============================================================
+    # Groq
+    # ============================================================
 
     def _generate_groq(self, prompt: str) -> str:
         """Generate a response using Groq."""
@@ -132,29 +149,29 @@ class LLMService:
             )
 
         message = response.choices[0].message
-
         text = getattr(message, "content", None)
 
         if not text or not text.strip():
             raise RuntimeError(
-                "Groq returned a response without "
-                "usable text content."
+                "Groq returned a response without usable text content."
             )
 
         return text.strip()
+
+    # ============================================================
+    # Response validation
+    # ============================================================
+
     @staticmethod
     def _is_usable_response(response: str) -> bool:
-        """
-        Check whether an LLM response contains meaningful content.
-
-        Rejects empty responses and known non-answer responses such as
-        safety-only messages returned by some routed models.
-        """
+        """Check whether an LLM response contains useful content."""
 
         if not response or not response.strip():
             return False
 
-        normalized = " ".join(response.strip().split()).lower()
+        normalized = " ".join(
+            response.strip().split()
+        ).lower()
 
         unusable_responses = {
             "user safety: safe",
@@ -166,12 +183,56 @@ class LLMService:
         if normalized in unusable_responses:
             return False
 
-        # Very short responses are unlikely to be useful for
-        # CodeForge's generation tasks.
-        if len(normalized) < 20:
-            return False
+        return len(normalized) >= 20
 
-        return True
+    # ============================================================
+    # Provider ordering
+    # ============================================================
+
+    @staticmethod
+    def _provider_priority(
+        preferred_provider: Optional[str],
+    ) -> list[str]:
+        """Return provider order."""
+
+        providers = [
+            "gemini",
+            "openrouter",
+            "groq",
+        ]
+
+        if not preferred_provider:
+            return providers
+
+        preferred = preferred_provider.lower().strip()
+
+        if preferred not in providers:
+            return providers
+
+        return [
+            preferred,
+            *[
+                provider
+                for provider in providers
+                if provider != preferred
+            ],
+        ]
+
+    def _get_provider_function(
+        self,
+        provider_name: str,
+    ) -> Callable[[str], str]:
+        """Return the generation function for a provider."""
+
+        return {
+            "gemini": self._generate_gemini,
+            "openrouter": self._generate_openrouter,
+            "groq": self._generate_groq,
+        }[provider_name]
+
+    # ============================================================
+    # Main generation
+    # ============================================================
 
     def generate(
         self,
@@ -179,13 +240,10 @@ class LLMService:
         preferred_provider: Optional[str] = None,
     ) -> str:
         """
-        Generate text using the configured LLM providers.
+        Generate a response using bounded provider fallback.
 
-        Default priority:
-            Gemini → OpenRouter → Groq
-
-        If preferred_provider is supplied, that provider
-        is attempted first.
+        Each provider is attempted only once. This prevents a stalled
+        or exhausted provider from causing a long blocking loop.
         """
 
         if not prompt or not prompt.strip():
@@ -193,54 +251,58 @@ class LLMService:
                 "Prompt cannot be empty."
             )
 
-        providers = [
-            ("gemini", self._generate_gemini),
-            ("openrouter", self._generate_openrouter),
-            ("groq", self._generate_groq),
-        ]
-
-        if preferred_provider:
-            preferred_provider = preferred_provider.lower()
-
-            providers.sort(
-                key=lambda item:
-                0 if item[0] == preferred_provider else 1
-            )
+        providers = self._provider_priority(
+            preferred_provider
+        )
 
         errors: list[str] = []
 
-        for provider_name, provider_function in providers:
-            try:
-                print(
-                    f"\n[LLM SERVICE] Trying provider: "
-                    f"{provider_name}"
-                )
+        for provider_name in providers:
+            provider_function = self._get_provider_function(
+                provider_name
+            )
 
-                response = provider_function(prompt)
-
-                if not self._is_usable_response(response):
-                    raise RuntimeError(
-                        f"{provider_name} returned an unusable response."
+            for attempt in range(
+                1,
+                self.MAX_RETRIES_PER_PROVIDER + 1,
+            ):
+                try:
+                    print(
+                        f"\n[LLM SERVICE] Trying provider: "
+                        f"{provider_name} "
+                        f"(attempt {attempt}/"
+                        f"{self.MAX_RETRIES_PER_PROVIDER})"
                     )
-                print(
-                    f"[LLM SERVICE] Success: "
-                    f"{provider_name}"
-                )
-                
-                return response
 
-            except Exception as exc:
-                error_message = (
-                    f"{provider_name}: "
-                    f"{type(exc).__name__}: {exc}"
-                )
+                    response = provider_function(prompt)
 
-                errors.append(error_message)
+                    if not self._is_usable_response(
+                        response
+                    ):
+                        raise RuntimeError(
+                            f"{provider_name} returned "
+                            f"an unusable response."
+                        )
 
-                print(
-                    f"[LLM SERVICE] Failed: "
-                    f"{error_message}"
-                )
+                    print(
+                        f"[LLM SERVICE] Success: "
+                        f"{provider_name}"
+                    )
+
+                    return response
+
+                except Exception as exc:
+                    error_message = (
+                        f"{provider_name}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+                    errors.append(error_message)
+
+                    print(
+                        f"[LLM SERVICE] Failed: "
+                        f"{error_message}"
+                    )
 
         raise RuntimeError(
             "All configured LLM providers failed.\n\n"
